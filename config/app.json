@@ -1,0 +1,28 @@
+{
+  "database": "data/records.db",
+  "logLevel": "info",
+  "logDir": "logs",
+  "poll": { "defaultIntervalMs": 1000, "timeoutMs": 800, "retry": 2 },
+  "devices": [
+    {
+      "name": "plc-01",
+      "transport": "tcp",
+      "address": "127.0.0.1:5020",
+      "unitId": 1,
+      "pollIntervalMs": 500,
+      "metrics": ["response_ms", "register_0"]
+    },
+    {
+      "name": "meter-02",
+      "transport": "csv",
+      "address": "data/replay/meter-02.csv",
+      "unitId": 2,
+      "pollIntervalMs": 1000,
+      "metrics": ["response_ms"]
+    }
+  ],
+  "alarms": [
+    { "name": "timeout-streak", "device": "plc-01", "rule": "timeout>=3", "windowSec": 60 },
+    { "name": "p95-latency", "device": "plc-01", "rule": "p95_response_ms>500", "windowSec": 300 }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "title": "设备数据采集测试报告",
+  "defaultRange": "1h",
+  "sections": ["overview", "success_rate", "latency", "quality", "alarms", "env"],
+  "chartPoints": 120
+}

@@ -1,0 +1,42 @@
+[Unit]
+Description=设备数据采集平台 · 接口与仪表盘（collector-platform-api）
+Documentation=https://github.com/WWB2006/collector-platform
+After=network.target
+
+[Service]
+Type=simple
+User=collector
+Group=collector
+WorkingDirectory=/opt/collector-platform
+
+Environment=PYTHONUNBUFFERED=1
+Environment=COLLECTOR_CONFIG=/opt/collector-platform/config/app.json
+
+# 接口与采集是**两个进程**，故意不合并：
+# 采集要长时间稳定运行、接口会被重启发版，绑在一起会让「改个接口」变成
+# 「中断采集」；而且 SQLite 是 WAL 模式，两个进程并发读一个写不会互相阻塞。
+#
+# 只监听 127.0.0.1：这台机器上没有登录鉴权，直接暴露到公网等于把数据库
+# 的查询能力交出去。要对内网开放，就在前面挂一层带鉴权的反向代理。
+ExecStart=/opt/collector-platform/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8000 --workers 1
+
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=collector-platform-api
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+# 接口进程只读数据：把 data 目录设成只读，写库的职责留给采集进程。
+ReadOnlyPaths=/opt/collector-platform/data
+
+[Install]
+WantedBy=multi-user.target

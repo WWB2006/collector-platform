@@ -1,0 +1,11 @@
+# runtime
+fastapi
+uvicorn[standard]
+jinja2
+pydantic
+pymodbus
+
+# test / e2e
+httpx
+pytest
+pytest-cov

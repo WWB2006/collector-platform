@@ -1,0 +1,99 @@
+name: CI
+
+# 规格阶段 9：「CI 中每次提交自动执行」。
+#
+# 这里跑的门禁顺序是刻意的：先快后慢、先静态后动态。
+# lint 与配置校验几秒钟就能给反馈，端到端要真的采集十几秒——
+# 把慢的放后面，改坏一行代码时不用等半分钟才知道。
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    name: 测试（Python ${{ matrix.python-version }}）
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 两端：下限是 pyproject 里声明的 requires-python，上限是当前最新。
+        # 中间版本只在必要时补，免得 CI 时间翻几倍。
+        python-version: ["3.10", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff
+
+      - name: 代码风格
+        run: ruff check .
+
+      - name: 单元测试与覆盖率
+        run: pytest -q --cov=app --cov-report=term-missing --cov-report=xml
+
+      - name: 覆盖率门槛
+        # 覆盖率不是目的，但「突然掉 30%」一定是有人删了测试而不是重构了代码。
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          rate = float(ET.parse("coverage.xml").getroot().get("line-rate"))
+          print(f"行覆盖率 {rate:.1%}")
+          if rate < 0.80:
+              raise SystemExit(f"覆盖率低于 80%：{rate:.1%}")
+          PY
+
+      - name: 端到端（CSV 回放，不依赖模拟器与网络）
+        # 这条链路是项目的验收底线：采集 -> 落库 -> 统计 -> 告警 -> 报告。
+        # 用 --speed 20 把 10 分钟的回放压进十几秒，并且保证跑得出告警事件
+        # （回放数据里每 40 组安排一次连续 3 次超时）。
+        run: |
+          python scripts/seed_demo_data.py --minutes 10
+          python scripts/run_collector.py --config config/app.test.json \
+            --seconds 12 --speed 20 --quiet
+          python scripts/generate_report.py --config config/app.test.json \
+            --range 1h --out reports/ci-report.html
+          test -s reports/ci-report.html
+          grep -q "timeout" reports/ci-report.html
+          echo "端到端产物：$(wc -c < reports/ci-report.html) 字节"
+
+      - name: 上传覆盖率报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-py${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  report-sample:
+    name: 生成报告样例
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: 造数据并出报告
+        run: |
+          python scripts/seed_demo_data.py --minutes 30
+          python scripts/run_collector.py --config config/app.test.json \
+            --seconds 30 --speed 60 --quiet
+          python scripts/generate_report.py --config config/app.test.json \
+            --range 1h --out reports/sample-report.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sample-report
+          path: reports/sample-report.html

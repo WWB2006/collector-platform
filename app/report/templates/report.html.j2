@@ -1,0 +1,337 @@
+{#
+  设备数据采集测试报告模板。
+
+  自包含：不引用任何外部 CSS/JS/CDN。同事把这份 HTML 存到本地、断网打开，
+  看到的必须和生成时一模一样——报告是要当附件发出去的东西。
+
+  图表由 app/report/charts.py 在服务端渲染成内联 SVG 后传入（charts 字典），
+  模板只负责排版，不做任何计算。
+#}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} · {{ fromText }} ~ {{ toText }}</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #e4e7ec;
+    --text: #1f2329;
+    --muted: #6b7280;
+    --primary: #2563eb;
+    --ok: #16a34a;
+    --danger: #dc2626;
+    --warn: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 16px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  header.report-head {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px 28px;
+    margin-bottom: 16px;
+  }
+  h1 { margin: 0 0 8px; font-size: 22px; }
+  h2 { margin: 0 0 14px; font-size: 16px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .meta span { margin-right: 18px; }
+  .conclusion {
+    margin-top: 16px;
+    padding: 12px 16px;
+    background: #f0f6ff;
+    border-left: 3px solid var(--primary);
+    border-radius: 0 6px 6px 0;
+  }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .cards { display: flex; flex-wrap: wrap; gap: 12px; }
+  .card {
+    flex: 1 1 130px;
+    background: #fafbfc;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .card .k { color: var(--muted); font-size: 12px; }
+  .card .v { font-size: 20px; font-weight: 600; margin-top: 4px; }
+  .card .v.ok { color: var(--ok); }
+  .card .v.bad { color: var(--danger); }
+  .charts { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+  .charts .wide { flex: 1 1 480px; min-width: 320px; }
+  .charts .narrow { flex: 0 0 180px; text-align: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; background: #fafbfc; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 10px;
+    font-size: 12px; background: #eef2f7; color: var(--muted);
+  }
+  .pill.ok { background: #e8f5ec; color: var(--ok); }
+  .pill.bad { background: #fdeaea; color: var(--danger); }
+  .pill.warn { background: #fef4e2; color: var(--warn); }
+  pre {
+    margin: 0; padding: 12px; background: #fafbfc; border: 1px solid var(--border);
+    border-radius: 6px; overflow-x: auto; font-size: 12px; line-height: 1.5;
+  }
+  .empty { color: var(--muted); padding: 12px 0; }
+  dl.env { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; margin: 0; }
+  dl.env dt { color: var(--muted); }
+  dl.env dd { margin: 0; word-break: break-all; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 24px; }
+  @media print {
+    body { background: #fff; padding: 0; }
+    section, header.report-head { break-inside: avoid; border-color: #ddd; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="report-head">
+    <h1>{{ title }}</h1>
+    <div class="meta">
+      <span>时间范围：{{ fromText }} ~ {{ toText }}</span>
+      {% if rangeLabel %}<span>范围标识：{{ rangeLabel }}</span>{% endif %}
+      <span>生成时间：{{ generatedAtText }}</span>
+    </div>
+    <div class="conclusion">{{ conclusion }}</div>
+  </header>
+
+  {# ---------------- 总览 ---------------- #}
+  <section>
+    <h2>总览</h2>
+    <div class="cards">
+      <div class="card">
+        <div class="k">样本总数</div>
+        <div class="v">{{ summary.total }}</div>
+      </div>
+      <div class="card">
+        <div class="k">成功 / 失败</div>
+        <div class="v">{{ summary.ok }} / {{ summary.failed }}</div>
+      </div>
+      <div class="card">
+        <div class="k">成功率</div>
+        <div class="v {% if summary.successRate >= 0.99 %}ok{% elif summary.successRate < 0.95 %}bad{% endif %}">
+          {{ "%.2f%%"|format(summary.successRate * 100) }}
+        </div>
+      </div>
+      <div class="card">
+        <div class="k">P50</div>
+        <div class="v">{{ "%.1f"|format(summary.latency.p50) }} <small>ms</small></div>
+      </div>
+      <div class="card">
+        <div class="k">P95</div>
+        <div class="v">{{ "%.1f"|format(summary.latency.p95) }} <small>ms</small></div>
+      </div>
+      <div class="card">
+        <div class="k">P99</div>
+        <div class="v">{{ "%.1f"|format(summary.latency.p99) }} <small>ms</small></div>
+      </div>
+    </div>
+    <div class="charts" style="margin-top:20px">
+      <div class="narrow">
+        {{ charts.success | safe }}
+        <div class="meta" style="margin-top:6px">成功率</div>
+      </div>
+      <div class="wide">
+        {{ charts.latency | safe }}
+      </div>
+    </div>
+  </section>
+
+  {# ---------------- 质量码分布 ---------------- #}
+  <section>
+    <h2>质量码分布</h2>
+    {{ charts.quality | safe }}
+    <table style="margin-top:14px">
+      <thead>
+        <tr><th>质量码</th><th>含义</th><th class="num">条数</th><th class="num">占比</th></tr>
+      </thead>
+      <tbody>
+        {% for code, bucket in summary.quality.items() %}
+        <tr>
+          <td>{{ code }}</td>
+          <td>
+            <span class="pill {% if code == '0' %}ok{% else %}bad{% endif %}">
+              {{ bucket.label }}
+            </span>
+          </td>
+          <td class="num">{{ bucket.count }}</td>
+          <td class="num">
+            {{ "%.1f%%"|format(bucket.count / summary.total * 100) if summary.total else "—" }}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="empty">该区间内没有样本。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  {# ---------------- 分设备 ---------------- #}
+  <section>
+    <h2>分设备统计</h2>
+    {% if devices %}
+    <table>
+      <thead>
+        <tr>
+          <th>设备</th><th class="num">样本</th><th class="num">成功</th>
+          <th class="num">成功率</th><th class="num">P50</th>
+          <th class="num">P95</th><th class="num">P99</th><th class="num">最大</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for device in devices %}
+        <tr>
+          <td>{{ device.device }}</td>
+          <td class="num">{{ device.total }}</td>
+          <td class="num">{{ device.ok }}</td>
+          <td class="num">{{ "%.2f%%"|format(device.successRate * 100) }}</td>
+          <td class="num">{{ "%.1f"|format(device.latency.p50) }}</td>
+          <td class="num">{{ "%.1f"|format(device.latency.p95) }}</td>
+          <td class="num">{{ "%.1f"|format(device.latency.p99) }}</td>
+          <td class="num">{{ "%.1f"|format(device.latency.max) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">没有可统计的设备。</div>
+    {% endif %}
+  </section>
+
+  {# ---------------- 告警 ---------------- #}
+  <section>
+    <h2>告警记录</h2>
+    {% if alarms %}
+    <table>
+      <thead>
+        <tr><th>设备</th><th>规则</th><th>开始</th><th>结束</th><th>状态</th><th>详情</th></tr>
+      </thead>
+      <tbody>
+        {% for alarm in alarms %}
+        <tr>
+          <td>{{ alarm.device }}</td>
+          <td>{{ alarm.rule }}</td>
+          <td>{{ alarm.startedAtText }}</td>
+          <td>{{ alarm.endedAtText or "—" }}</td>
+          <td>
+            {% if alarm.active %}<span class="pill bad">告警中</span>
+            {% else %}<span class="pill ok">已恢复</span>{% endif %}
+          </td>
+          <td>{{ alarm.detail or "" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">该区间内没有告警记录。</div>
+    {% endif %}
+  </section>
+
+  {# ---------------- 异常明细 ---------------- #}
+  <section>
+    <h2>异常明细</h2>
+    {% if exceptions %}
+    <table>
+      <thead>
+        <tr><th>时间</th><th>设备</th><th>指标</th><th class="num">值</th><th>质量码</th></tr>
+      </thead>
+      <tbody>
+        {% for item in exceptions %}
+        <tr>
+          <td>{{ item.tsText }}</td>
+          <td>{{ item.device }}</td>
+          <td>{{ item.metric }}</td>
+          <td class="num">{{ "%.2f"|format(item.value) }}</td>
+          <td><span class="pill bad">{{ item.qualityLabel }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="meta" style="margin-top:8px">
+      最多列出 {{ exceptions|length }} 条；完整数据请查询数据库或接口。
+    </div>
+    {% else %}
+    <div class="empty">该区间内没有异常样本。</div>
+    {% endif %}
+  </section>
+
+  {# ---------------- 环境信息 ---------------- #}
+  <section>
+    <h2>环境信息</h2>
+    <dl class="env">
+      <dt>采集器版本</dt><dd>{{ environment.collectorVersion }}</dd>
+      <dt>Python</dt><dd>{{ environment.python }}</dd>
+      <dt>运行平台</dt><dd>{{ environment.platform }}</dd>
+      <dt>配置文件</dt><dd>{{ environment.configPath }}</dd>
+      <dt>数据库</dt><dd>{{ environment.database }}</dd>
+      <dt>数据库大小</dt><dd>{{ environment.databaseSizeText }}</dd>
+      <dt>库内样本总量</dt><dd>{{ environment.sampleTotal }}</dd>
+      <dt>生成时间</dt><dd>{{ environment.generatedAtText }}</dd>
+      <dt>时间范围</dt><dd>{{ environment.fromText }} ~ {{ environment.toText }}</dd>
+    </dl>
+
+    <h2 style="margin-top:22px">采集配置</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>设备</th><th>传输</th><th>地址</th>
+          <th class="num">单元号</th><th class="num">周期(ms)</th><th>指标</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for device in environment.devices %}
+        <tr>
+          <td>{{ device.name }}</td>
+          <td>{{ device.transport }}</td>
+          <td>{{ device.address }}</td>
+          <td class="num">{{ device.unitId }}</td>
+          <td class="num">{{ device.pollIntervalMs }}</td>
+          <td>{{ device.metrics | join(", ") }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="meta" style="margin-top:8px">
+      默认周期 {{ environment.poll.defaultIntervalMs }} ms ·
+      超时 {{ environment.poll.timeoutMs }} ms ·
+      重试 {{ environment.poll.retry }} 次
+    </div>
+  </section>
+
+  {# ---------------- 配置快照 ---------------- #}
+  <section>
+    <h2>配置快照</h2>
+    <div class="meta" style="margin-bottom:8px">
+      报告生成时刻的完整配置，便于复现这一份结果。
+    </div>
+    <pre>{{ configSnapshot | tojson_pretty }}</pre>
+  </section>
+
+  <footer>
+    本报告由 collector-platform 于 {{ generatedAtText }} 生成，内容为生成时刻的数据快照，
+    不随数据库变化。
+  </footer>
+</div>
+</body>
+</html>

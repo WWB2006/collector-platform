@@ -1,0 +1,44 @@
+[Unit]
+Description=设备数据采集平台 · 采集进程（collector-platform）
+Documentation=https://github.com/WWB2006/collector-platform
+# 采集进程要连 PLC/仪表，等网络就绪再启动；但不能因为对方设备没上线就起不来，
+# 所以只依赖 network.target（网络栈就绪），不用 network-online.target。
+After=network.target
+
+[Service]
+Type=simple
+User=collector
+Group=collector
+WorkingDirectory=/opt/collector-platform
+
+# 用虚拟环境里的解释器，不要依赖系统的 python3：
+# 部署机上往往同时存在多个 Python，写死绝对路径才不会有「我这儿能跑」的问题。
+Environment=PYTHONUNBUFFERED=1
+Environment=COLLECTOR_CONFIG=/opt/collector-platform/config/app.json
+ExecStart=/opt/collector-platform/.venv/bin/python scripts/run_collector.py \
+    --config /opt/collector-platform/config/app.json
+
+# 采集进程的正常退出方式是收到 SIGTERM 后把队列排空再关库
+# （scripts/run_collector.py 里装了信号处理器），所以给足 30 秒。
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=always
+RestartSec=5
+
+# 日志走 journald，用 journalctl -u collector-platform -f 看。
+# 应用自己也会写 logs/ 下的滚动文件，两处都留着：
+# journald 便于运维排查，文件便于打包发给别人。
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=collector-platform
+
+# --- 加固（尽量少给权限，这个进程只需要读写自己的目录和连 TCP）---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/collector-platform/data /opt/collector-platform/logs /opt/collector-platform/reports
+
+[Install]
+WantedBy=multi-user.target

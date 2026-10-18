@@ -1,0 +1,29 @@
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.vscode/
+.idea/
+
+# --- runtime output (regenerated, never committed) ---
+data/*.db
+data/*.db-wal
+data/*.db-shm
+reports/*.html
+logs/
+.pytest_tmp/
+_shots/
+_shots_live/
+*.log
+_*.py
+_*.txt
+
+# --- keep these tracked ---
+!data/replay/*.csv
+
