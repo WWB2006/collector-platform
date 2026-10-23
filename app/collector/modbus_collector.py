@@ -47,6 +47,7 @@ class ModbusCollector(Collector):
         poll: PollConfig,
         *,
         client_factory: ClientFactory | None = None,
+        **_ignored: Any,
     ) -> None:
         super().__init__(device, poll)
         self._host, self._port = parse_tcp_address(device.address)
