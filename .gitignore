@@ -21,8 +21,10 @@ logs/
 _shots/
 _shots_live/
 *.log
+# Temporary scratch probe files
 _*.py
 _*.txt
+!**/__init__.py
 
 # --- keep these tracked ---
 !data/replay/*.csv
