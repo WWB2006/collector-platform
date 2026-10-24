@@ -108,26 +108,52 @@ def generate_replay_files(minutes: int, out_dir: Path, seed: int) -> list[Path]:
 
 
 def seed_database(config_path: str, rows: int, seed: int) -> int:
-    """把合成样本直接灌进数据库（不做真实采集）。"""
+    """把合成样本直接灌进数据库（不做真实采集）。
+    覆盖配置中的全部已启用设备（plc-01、meter-02），包含正常采样、偶发弱网、超时与历史告警事件。
+    """
     config = load_config(config_path)
     db = Database(config.database_path)
     db.init_schema()
     repo = Repository(db)
     mapping = repo.sync_devices(config.devices)
-    device_id = mapping[config.devices[0].name]
 
     rng = random.Random(seed)
-    base_ts = int(time.time() * 1000) - rows * 500
+    now_ts = int(time.time() * 1000)
+    # 生成覆盖最近时间窗口的样本（确保默认 10m / 1h 窗口打开即有丰富数据）
+    base_ts = now_ts - rows * 500
 
-    def gen():
-        for i in range(rows):
-            ts = base_ts + i * 500
-            failed = i % 100 == 99
-            quality = QUALITY_TIMEOUT if failed else QUALITY_OK
-            yield (device_id, ts, "response_ms",
-                   0.0 if failed else round(rng.gauss(12.0, 3.0), 2), quality)
+    plc_id = mapping.get("plc-01") or next(iter(mapping.values()))
+    meter_id = mapping.get("meter-02")
 
-    inserted = repo.insert_samples(gen())
+    samples_to_insert = []
+    for i in range(rows):
+        ts = base_ts + i * 500
+        # plc-01 (500ms 一次采样)
+        failed_plc = (i % 80 in (77, 78, 79))  # 制造偶发连续3次超时
+        quality_plc = QUALITY_TIMEOUT if failed_plc else QUALITY_OK
+        lat_plc = 800.0 if failed_plc else max(1.0, round(rng.gauss(14.0, 3.5), 2) + (120 if i % 50 == 0 else 0))
+        samples_to_insert.append((plc_id, ts, "response_ms", lat_plc, quality_plc))
+        samples_to_insert.append((plc_id, ts, "register_0", 220.0 if not failed_plc else 0.0, quality_plc))
+
+        # meter-02 (每 1000ms 一次采样)
+        if meter_id and (i % 2 == 0):
+            failed_meter = (i % 90 == 89)
+            quality_meter = QUALITY_TIMEOUT if failed_meter else QUALITY_OK
+            lat_meter = 800.0 if failed_meter else max(2.0, round(rng.gauss(18.0, 4.0), 2))
+            samples_to_insert.append((meter_id, ts, "response_ms", lat_meter, quality_meter))
+
+    inserted = repo.insert_samples(samples_to_insert)
+
+    # 写入一条逼真的已恢复历史告警
+    try:
+        alarm_start = now_ts - 12 * 60 * 1000  # 12分钟前触发
+        alarm_end = now_ts - 10 * 60 * 1000    # 10分钟前恢复
+        aid = repo.open_alarm(plc_id, "timeout>=3", alarm_start, detail='{"reason": "连续3次请求超时", "count": 3}')
+        if aid:
+            repo.close_alarm(aid, alarm_end, detail='{"reason": "通信链路已自动恢复", "status": "resolved"}')
+    except Exception:
+        pass
+
     db.close_all()
     return inserted
 
